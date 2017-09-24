@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"time"
 
+	"log"
+
 	aauthz "github.com/Azure/azure-sdk-for-go/arm/authorization"
 	"github.com/Azure/azure-sdk-for-go/arm/graphrbac"
 	"github.com/Azure/azure-sdk-for-go/arm/resources/subscriptions"
@@ -11,13 +13,9 @@ import (
 	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
 	azdate "github.com/Azure/go-autorest/autorest/date"
-	"github.com/appscode/go-term"
 	"github.com/appscode/go/types"
-	"github.com/appscode/pharmer/api"
-	"github.com/appscode/pharmer/credential"
 	"github.com/cenkalti/backoff"
 	"github.com/pborman/uuid"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -49,15 +47,15 @@ func getSptFromDeviceFlow(oauthConfig adal.OAuthConfig, clientID, resource strin
 	return spt, nil
 }
 
-func IssueAzureCredential(name string) (*api.Credential, error) {
+func IssueAzureCredential(name string) error {
 	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, azureTenantID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	spt, err := getSptFromDeviceFlow(*oauthConfig, azureNativeApplicationID, azure.PublicCloud.ServiceManagementEndpoint)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	client := autorest.NewClientWithUserAgent(subscriptions.UserAgent())
@@ -71,13 +69,13 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 	}
 	tenants, err := tenantsClient.List()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	tenantID := types.String((*tenants.Value)[0].TenantID)
 
 	userOauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	userSpt, err := adal.NewServicePrincipalTokenFromManualToken(
@@ -86,12 +84,12 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 		azure.PublicCloud.ServiceManagementEndpoint,
 		spt.Token)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = userSpt.RefreshExchange(azure.PublicCloud.ServiceManagementEndpoint)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	userClient := autorest.NewClientWithUserAgent(subscriptions.UserAgent())
@@ -105,7 +103,7 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 	}
 	subs, err := userSubsClient.List()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	subscriptionID := types.String((*subs.Value)[0].SubscriptionID)
 
@@ -115,12 +113,12 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 		azure.PublicCloud.GraphEndpoint,
 		userSpt.Token)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	err = graphSpt.RefreshExchange(azure.PublicCloud.GraphEndpoint)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	graphClient := autorest.NewClientWithUserAgent(graphrbac.UserAgent())
@@ -151,7 +149,7 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 		PasswordCredentials:     &[]graphrbac.PasswordCredential{cred},
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 	clientID := *app.AppID
 
@@ -167,7 +165,7 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 		AccountEnabled: types.TrueP(),
 	})
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	roleDefClient := aauthz.RoleDefinitionsClient{
@@ -180,10 +178,10 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 
 	roles, err := roleDefClient.List("subscriptions/"+subscriptionID, `roleName eq 'Contributor'`)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(*roles.Value) == 0 {
-		term.Fatalln("Can't find Contributor role.")
+		log.Fatalln("Can't find Contributor role.")
 	}
 	roleID := (*roles.Value)[0].ID
 
@@ -206,22 +204,15 @@ func IssueAzureCredential(name string) (*api.Credential, error) {
 		return err
 	}, backoff.NewExponentialBackOff())
 
-	return &api.Credential{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: name,
-		},
-		Spec: api.CredentialSpec{
-			Provider: "Azure",
-			Data: map[string]string{
-				credential.AzureSubscriptionID: subscriptionID,
-				credential.AzureTenantID:       tenantID,
-				credential.AzureClientID:       clientID,
-				credential.AzureClientSecret:   clientSecret,
-			},
-		},
-	}, nil
+	fmt.Println(map[string]string{
+		"AzureSubscriptionID": subscriptionID,
+		"AzureTenantID":       tenantID,
+		"AzureClientID":       clientID,
+		"AzureClientSecret":   clientSecret,
+	})
+	return nil
 }
 
 func main() {
-
+	IssueAzureCredential("kmy")
 }
