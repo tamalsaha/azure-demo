@@ -16,6 +16,7 @@ import (
 	"github.com/appscode/go/types"
 	"github.com/cenkalti/backoff"
 	"github.com/pborman/uuid"
+	"os"
 )
 
 const (
@@ -72,6 +73,9 @@ func IssueAzureCredential(name string) error {
 		return err
 	}
 	tenantID := types.String((*tenants.Value)[0].TenantID)
+
+	fmt.Println(tenantID)
+	os.Exit(1)
 
 	userOauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, tenantID)
 	if err != nil {
